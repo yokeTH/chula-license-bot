@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import logging
 import os
 import pickle
@@ -28,7 +29,7 @@ def save_state(data: Dict[str, datetime]) -> None:
         pickle.dump(data, f)
 
 
-def main() -> None:
+async def main() -> None:
     load_dotenv()
     logging.basicConfig(
         format="%(asctime)s [%(levelname)s] %(message)s", level=logging.INFO
@@ -49,7 +50,7 @@ def main() -> None:
     client = PortalClient(email, password)
 
     try:
-        client.login()
+        await client.login()
 
         now = datetime.now()
 
@@ -68,7 +69,7 @@ def main() -> None:
                     )
                     continue
 
-            if client.borrow(item):
+            if await client.borrow(item):
                 logging.info(f"Successfully borrowed {item}")
                 state[item] = now
 
@@ -79,4 +80,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -1,10 +1,9 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional, TypedDict
+from typing import Any, Dict, Optional, TypedDict, cast
 
-import requests
 from bs4 import BeautifulSoup, Tag
-from requests import Response, Session
+from rnet import Client, Emulation
 
 # Network debug
 # import urllib3
@@ -21,9 +20,9 @@ class LicenseConfig(TypedDict):
 
 
 LICENSES: Dict[str, LicenseConfig] = {
-    "adobe": {"id": "5", "days": 7},
-    "foxit": {"id": "7", "days": 90},
-    "zoom": {"id": "2", "days": 120},
+    "adobe": {"id": "5", "days": 6},
+    "foxit": {"id": "7", "days": 89},
+    "zoom": {"id": "2", "days": 119},
 }
 
 
@@ -31,13 +30,19 @@ class PortalClient:
     def __init__(self, email: str, password: str) -> None:
         self.email: str = email
         self.password: str = password
-        self.session: Session = requests.Session()
 
-        self.session.headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
+        self.client = Client(
+            emulation=Emulation.Safari26,
+            cookie_store=True,
         )
+
+    @staticmethod
+    def _is_redirect(resp: Any) -> bool:
+        hist = getattr(resp, "history", None)
+        if hist:
+            return True
+        status = getattr(resp, "status", None)
+        return status in (301, 302, 303, 307, 308)
 
     def _get_form_payload(
         self, html: str, form_action: Optional[str] = None
@@ -65,25 +70,34 @@ class PortalClient:
                         payload[name] = str(value)
 
         for sel in container.find_all("select"):
-            if isinstance(sel, Tag):
-                name = sel.get("name")
+            if not isinstance(sel, Tag):
+                continue
+            name = sel.get("name")
+            if not isinstance(name, str):
+                continue
 
-                if isinstance(name, str):
-                    selected = sel.find("option", selected=True)
-                    if isinstance(selected, Tag):
-                        val = selected.get("value", "")
-                        payload[name] = str(val) if val is not None else ""
-                    else:
-                        payload[name] = ""
+            selected = sel.find("option", selected=True)
+            if isinstance(selected, Tag):
+                val = selected.get("value", "")
+                payload[name] = "" if val is None else str(val)
+                continue
+
+            first = sel.find("option")
+            if isinstance(first, Tag):
+                val = first.get("value", "")
+                payload[name] = "" if val is None else str(val)
+            else:
+                payload[name] = ""
 
         return payload
 
-    def login(self) -> None:
+    async def login(self) -> None:
         logging.info("Logging in...")
-        resp: Response = self.session.get(URL_LOGIN)
-        resp.raise_for_status()
 
-        payload = self._get_form_payload(resp.text)
+        landing = await self.client.get(URL_LOGIN)
+        landing.raise_for_status()
+
+        payload = self._get_form_payload(await landing.text())
         if "__RequestVerificationToken" not in payload:
             raise ValueError("CSRF token missing from login page")
 
@@ -95,12 +109,16 @@ class PortalClient:
             }
         )
 
-        post: Response = self.session.post(URL_LOGIN, data=payload)
+        login = await self.client.post(
+            URL_LOGIN, form=cast(Dict[str, str | int | float | bool], payload)
+        )
 
-        if "UserName" in post.text and "Password" in post.text:
+        login_text = await login.text()
+
+        if "UserName" in login_text and "Password" in login_text:
             raise PermissionError("Login failed. Check credentials.")
 
-    def borrow(self, license_key: str) -> bool:
+    async def borrow(self, license_key: str) -> bool:
         if license_key not in LICENSES:
             logging.error(f"Unknown license key: {license_key}")
             return False
@@ -111,10 +129,10 @@ class PortalClient:
 
         logging.info(f"Borrowing: {license_key} (Duration: {days} days)")
 
-        resp: Response = self.session.get(URL_BORROW)
-        resp.raise_for_status()
+        page = await self.client.get(URL_BORROW)
+        page.raise_for_status()
 
-        payload = self._get_form_payload(resp.text, form_action="/Home/Borrow")
+        payload = self._get_form_payload(await page.text(), form_action="/Home/Borrow")
 
         if "__RequestVerificationToken" not in payload:
             logging.error("CSRF token missing on borrow page")
@@ -129,14 +147,21 @@ class PortalClient:
             }
         )
 
-        post: Response = self.session.post(URL_BORROW, data=payload)
+        borrow = await self.client.post(
+            URL_BORROW,
+            form=cast(Dict[str, str | int | float | bool], payload),
+        )
+        borrow.raise_for_status()
 
-        if post.history and post.history[0].status_code == 302:
+        if self._is_redirect(borrow):
             return True
 
-        if "The field UserPrincipalName is required" in post.text:
+        body = await borrow.text()
+        if "The field UserPrincipalName is required" in body:
             logging.error("Server rejected payload (Missing UserPrincipalName)")
         else:
-            logging.error(f"Borrow failed. Status: {post.status_code}")
+            logging.error(
+                f"Borrow failed. Status: {getattr(borrow, 'status', 'unknown')}"
+            )
 
         return False
