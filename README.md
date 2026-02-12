@@ -1,10 +1,19 @@
 # Chula license
 Automate bot to borrow chula license
 
-## Dependencies
+## Usage
+### Github Actions
+1. Fork this repository
+2. Add repository secrets
+	1. Settings > Actions secrets and variables > Action
+	2. Add `LOGIN_EMAIL` and `LOGIN_PASSWORD`
+3. Manual run this workflow
+
+## Development and Local Setup
+### Dependencies
 - [uv](https://docs.astral.sh/uv/)
 
-## Set up
+### Set up
 1. Install dependencies
 
 ```bash
@@ -16,7 +25,7 @@ uv sync
 cp .env.example .env
 ```
 
-## Manually run a script
+### Manually run a script
 
 ```bash
 Usage: python main.py <license> [<license> ...]
@@ -28,7 +37,7 @@ Example:
   python main.py foxit zoom
 ```
 
-## Setup cronjob (linux)
+### Setup cronjob (linux)
 1. open crontab editor
 
 ```bash
