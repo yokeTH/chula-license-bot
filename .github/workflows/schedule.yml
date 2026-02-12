@@ -43,10 +43,23 @@ jobs:
             last-borrowed-
 
       - name: Run Borrow
-        run: uv run main.py foxit adobe zoom
+        run: |
+          set -o pipefail
+          uv run main.py foxit adobe zoom 2>&1 | tee log.log
         env:
           LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
           LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
+
+      - name: Logging
+        if: always()
+        run: |
+          {
+            echo "## Log"
+            echo ""
+            echo '```'
+            cat log.log || echo "(log.log not found)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Minimize uv cache
         run: uv cache prune --ci
